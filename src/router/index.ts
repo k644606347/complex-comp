@@ -1,23 +1,25 @@
 import Vue from 'vue'
 import VueRouter, { RouteConfig } from 'vue-router'
 import Home from '../views/Home.vue'
+import BigTable1 from '../big-table/reactive/big-table.vue'
+import BigTable2 from '../big-table/immutable/big-table.vue'
 
-Vue.use(VueRouter)
-
-const routes: Array<RouteConfig> = [
+export const routes: Array<RouteConfig> = [
   {
     path: '/',
     name: 'Home',
     component: Home
   },
   {
-    path: '/about',
-    name: 'About',
-    // route level code-splitting
-    // this generates a separate chunk (about.[hash].js) for this route
-    // which is lazy-loaded when the route is visited.
-    component: () => import(/* webpackChunkName: "about" */ '../views/About.vue')
-  }
+    path: '/big-table/reactive',
+    name: 'BigTable1',
+    component: BigTable1
+  },
+  {
+    path: '/big-table/immutable',
+    name: 'BigTable2',
+    component: BigTable2
+  },
 ]
 
 const router = new VueRouter({

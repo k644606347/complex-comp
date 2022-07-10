@@ -1,32 +1,57 @@
 <template>
-  <div id="app">
-    <div id="nav">
-      <router-link to="/">Home</router-link> |
-      <router-link to="/about">About</router-link>
+  <div :id="$style.app">
+    <div :class="$style.nav">
+      <router-link v-for="route in routes" :to="route.path" :key="route.name">
+        {{ route.name }}</router-link>
     </div>
-    <router-view/>
+    <router-view :class="$style.main" />
   </div>
 </template>
+<script>
+import { defineComponent } from "vue";
+import router, { routes } from "./router";
 
-<style lang="less">
+export default defineComponent({
+  name: 'App',
+  setup() {
+    return {
+      routes: routes
+    };
+  },
+})
+</script>
+
+<style lang="less" module>
+html, body {
+  margin: 0;
+  padding: 0;
+}
 #app {
+  margin: 15px;
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
   color: #2c3e50;
+  display: flex;
 }
 
-#nav {
-  padding: 30px;
-
+.nav {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
   a {
+    margin-right: 16px;
     font-weight: bold;
+    line-height: 36px;
     color: #2c3e50;
 
-    &.router-link-exact-active {
+    &:global(.router-link-exact-active) {
       color: #42b983;
     }
   }
+}
+.main {
+  flex: 1 1 auto;
 }
 </style>
