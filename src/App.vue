@@ -25,9 +25,12 @@ export default defineComponent({
 html, body {
   margin: 0;
   padding: 0;
+  min-height: 100vh;
 }
 #app {
-  margin: 15px;
+  padding: 15px;
+  min-height: 100vh;
+  box-sizing: border-box;
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
