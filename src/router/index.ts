@@ -3,6 +3,8 @@ import VueRouter, { RouteConfig } from 'vue-router'
 import Home from '../views/Home.vue'
 import BigTable1 from '../big-table/reactive/big-table.vue'
 import BigTable2 from '../big-table/immutable/big-table.vue'
+import AstDemo from '../ast/ast.vue';
+import ChartDemo from '../ast/chart.vue';
 
 export const routes: Array<RouteConfig> = [
   {
@@ -19,6 +21,16 @@ export const routes: Array<RouteConfig> = [
     path: '/big-table/immutable',
     name: 'BigTable2',
     component: BigTable2
+  },
+  {
+    path: '/ast',
+    name: 'AstDemo',
+    component: AstDemo
+  },
+  {
+    path: '/chart',
+    name: 'ChartDemo',
+    component: ChartDemo
   },
 ]
 
