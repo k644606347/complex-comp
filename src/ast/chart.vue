@@ -22,23 +22,26 @@ type ICondition = {
     result: boolean;
     value: string;
 }
+type IChainStatus = 'continue' | 'break';
 type ChartData = {
     nodes: Array<NodeConfig & {
         meta: {
             next?: string[];
             seq?: number;
+            chain: IChainStatus;
         }
     }>;
     edges: Array<EdgeConfig>;
     combos: Array<ComboConfig>;
+    conditionResult: boolean;
 };
 export default defineComponent({
     props: {
         code: {
             type: String,
-            // default: "3 || 1 && 2 || 3 && 3 && !((4 && 5 || !(5 && !6)) || 7) || 5 && 3 || 8 || 9 || 10 || (11 && 12 || !(13) && (14 || 15))",
+            default: "3 && 1 && 2 || 3 && !(!4 && 5 || !!(!6 && !3)) || 7 && 8 && !9 && 10 && (11 || 12) && !(13 && 14 || !15)",
             // default: "3 || 1 && 2 || 3 && 3 && !((4 && 5 || !(5 && !6)) || 7) || !(8 || 9 || 10)",
-            default: '1 && 1.1 && 1.2 && !(2 || 3 || 4) && !(5 && 6) || (7 || !(4 && 8 || !(!2 || !10)))'
+            // default: '1 && !(2 || 3 || 4) && !(5 && 6) || (7 || !(4 && 8 || !(!2 || !10)))'
             // default: '1 && (2 || 3 || 4) && 5'
         },
         // code: { type: String, default: "1 || 2 || 3 && 4 || 5" },
@@ -52,12 +55,12 @@ export default defineComponent({
                 },
                 { 
                     seq: 2,
-                    result: false,
+                    result: true,
                     value: 'sourceId === "sss"'
                 },
                 { 
                     seq: 3,
-                    result: false,
+                    result: true,
                     value: 'timestamp > 4567'
                 },
                 { 
@@ -89,12 +92,14 @@ export default defineComponent({
         });
 
         function codeToChart(code: string, ast: any) {
-            let result: ChartData = { nodes: [], edges: [], combos: [] };
+            let result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false };
 
             const startNode: ChartData['nodes'][number] = {
                 id: "start",
                 label: "开始",
-                meta: {},
+                meta: {
+                    chain: 'continue',
+                },
                 linkPoints: {
                     right: true,
                 },
@@ -104,7 +109,9 @@ export default defineComponent({
             result.nodes.push({
                 id: "end",
                 label: "结束",
-                meta: {},
+                meta: {
+                    chain: 'continue',
+                },
             });
             
             const ignoreNodes = ['start', 'end'];
@@ -115,7 +122,7 @@ export default defineComponent({
                     result.edges.push({
                         source: node.id,
                         target: "end",
-                        style: initEdgeStyle(props.conditions.find(condition => condition.seq === node.meta.seq)?.result),
+                        style: initEdgeStyle(node.meta.chain === 'continue'),
                     });
                 }
             });
@@ -127,24 +134,27 @@ export default defineComponent({
             parentNodes: ChartData["nodes"],
             parentCombo?: string
         ) {
-            const result: ChartData = { nodes: [], edges: [], combos: [] };
+            const result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false };
             if (!expression) return result;
+
+            const parentNodeHasContinue = parentNodes.some(n => n.meta.chain === 'continue');
 
             if (expression.type === "LogicalExpression") {
                 // const parenthesized = expression.left.extra?.parenthesized;
+                // console.log('parenthesized', parenthesized)
                 const leftData = astToChartEdges(expression.left, parentNodes, parentCombo);
                 result.edges = result.edges.concat(leftData.edges);
                 result.nodes = result.nodes.concat(leftData.nodes);
                 result.combos = result.combos.concat(leftData.combos);
-                // console.log('parenthesized', parenthesized)
                 const nextParents = expression.operator === "&&"
                     ? result.nodes.filter(node => !node.meta?.next)
                     : parentNodes;
-                // console.log('nextParents', nextParents, JSON.stringify(result.nodes))
+
                 const rightData = astToChartEdges(expression.right, nextParents, parentCombo);
                 result.edges = result.edges.concat(rightData.edges);
                 result.nodes = result.nodes.concat(rightData.nodes);
                 result.combos = result.combos.concat(rightData.combos);
+                result.conditionResult = expression.operator === "&&" ? (leftData.conditionResult && rightData.conditionResult) : (leftData.conditionResult || rightData.conditionResult);
             } else if (expression.type === "NumericLiteral") {
                 const nodeId = expression.value + '_' + Math.ceil(Math.random() * 100000000).toString(16);
                 const conditionResult = props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result;
@@ -154,13 +164,13 @@ export default defineComponent({
                     }
                     parentNode.meta.next.push(nodeId);
                 
-                    const parentConditionResult = parentNode.id === 'start' ? true : props.conditions.find(condition => Number(condition.seq) === Number(parentNode.meta.seq))?.result;
                     console.log('parent', parentNode, props.conditions.find(condition => Number(condition.seq) === Number(parentNode.meta.seq)));
                     console.log('cur', expression.value, props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result)
+
                     result.edges.push({
                         source: parentNode.id,
                         target: nodeId,
-                        style: initEdgeStyle(parentConditionResult && conditionResult),
+                        style: initEdgeStyle(parentNodeHasContinue),
                     });
                 })
 
@@ -170,6 +180,7 @@ export default defineComponent({
                     label: "条件" + String(expression.value),
                     meta: {
                         seq: expression.value,
+                        chain: parentNodeHasContinue && conditionResult ? 'continue' : 'break',
                     },
                     labelCfg: {
                         style: {
@@ -180,6 +191,7 @@ export default defineComponent({
                         right: true,
                     },
                 })
+                result.conditionResult = Boolean(conditionResult);
             } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
                 const comboId = 'combo_' + Math.ceil(Math.random() * 1000000).toString(16);
                 result.combos.push({
@@ -192,9 +204,16 @@ export default defineComponent({
                     },
                 })
                 const children = astToChartEdges(expression.argument, parentNodes, comboId);
+                const conditionResult = !children.conditionResult;
                 result.edges = result.edges.concat(children.edges);
                 result.nodes = result.nodes.concat(children.nodes);
                 result.combos = result.combos.concat(children.combos);
+                result.nodes.forEach(n => {
+                    n.meta.chain = parentNodeHasContinue && conditionResult ? 'continue' : 'break';
+                });
+                result.edges.forEach(edge => {
+                    edge.style = initEdgeStyle(parentNodeHasContinue && result.conditionResult);
+                });
             } else {
                 return result;
             }
@@ -231,7 +250,7 @@ function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
         },
         stroke: color,
         lineWidth: 1.5,
-        radius: 20,
+        radius: 10,
     }
 }
 
@@ -256,9 +275,10 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
         modes: {
             default: [
                 "drag-canvas",
-                // "drag-node",
+                "drag-node",
                 "zoom-canvas",
                 "click-select",
+                // 'drag-combo',
             ],
         },
         plugins: [minimap, toolbar],
@@ -266,8 +286,8 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
             type: "dagre",
             rankdir: "LR",
             // align: "UL",
-            controlPoints: true,
-            sortByCombo: true,
+            // controlPoints: true,
+            // sortByCombo: true,
             // nodesepFunc: () => 20,
             // ranksepFunc: () => 15,
         },
