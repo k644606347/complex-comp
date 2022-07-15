@@ -147,37 +147,38 @@ export default defineComponent({
                 result.combos = result.combos.concat(rightData.combos);
             } else if (expression.type === "NumericLiteral") {
                 const nodeId = expression.value + '_' + Math.ceil(Math.random() * 100000000).toString(16);
+                const conditionResult = props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result;
                 parentNodes.forEach(parentNode => {
                     if (!parentNode.meta.next) {
                         parentNode.meta.next = [];
                     }
                     parentNode.meta.next.push(nodeId);
                 
-                    const parentConditionResult = parentNode.id === 'start' ? true : props.conditions.find(condtion => Number(condtion.seq) === Number(parentNode.meta.seq))?.result;
-                    const conditionResult = props.conditions.find(condtion => Number(condtion.seq) === Number(expression.value))?.result;
-                    console.log('parent', parentNode, props.conditions.find(condtion => Number(condtion.seq) === Number(parentNode.meta.seq)));
-                    console.log('cur', expression.value, props.conditions.find(condtion => Number(condtion.seq) === Number(expression.value))?.result)
+                    const parentConditionResult = parentNode.id === 'start' ? true : props.conditions.find(condition => Number(condition.seq) === Number(parentNode.meta.seq))?.result;
+                    console.log('parent', parentNode, props.conditions.find(condition => Number(condition.seq) === Number(parentNode.meta.seq)));
+                    console.log('cur', expression.value, props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result)
                     result.edges.push({
                         source: parentNode.id,
                         target: nodeId,
                         style: initEdgeStyle(parentConditionResult && conditionResult),
                     });
-                    result.nodes.push({
-                        comboId: parentCombo,
-                        id: nodeId,
-                        label: "条件" + String(expression.value),
-                        meta: {
-                            seq: expression.value,
-                        },
-                        labelCfg: {
-                            style: {
-                                fill: conditionResult ? '#30C453' : '#FA4E3E'
-                            }
-                        },
-                        linkPoints: {
-                            right: true,
-                        },
-                    });  
+                })
+
+                result.nodes.push({
+                    comboId: parentCombo,
+                    id: nodeId,
+                    label: "条件" + String(expression.value),
+                    meta: {
+                        seq: expression.value,
+                    },
+                    labelCfg: {
+                        style: {
+                            fill: conditionResult ? '#30C453' : '#FA4E3E'
+                        }
+                    },
+                    linkPoints: {
+                        right: true,
+                    },
                 })
             } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
                 const comboId = 'combo_' + Math.ceil(Math.random() * 1000000).toString(16);
@@ -219,8 +220,8 @@ export default defineComponent({
     },
 });
 
-function initEdgeStyle(condtionResult?: boolean): ShapeStyle {
-    const color = condtionResult ? '#326BFB' : '#BBBDBF';
+function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
+    const color = conditionResult ? '#326BFB' : '#BBBDBF';
     return {
         // endArrow: true,
         endArrow: {
