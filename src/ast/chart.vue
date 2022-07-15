@@ -204,16 +204,18 @@ export default defineComponent({
                     },
                 })
                 const children = astToChartEdges(expression.argument, parentNodes, comboId);
-                const conditionResult = !children.conditionResult;
+                result.conditionResult = !children.conditionResult;
                 result.edges = result.edges.concat(children.edges);
                 result.nodes = result.nodes.concat(children.nodes);
                 result.combos = result.combos.concat(children.combos);
-                result.nodes.forEach(n => {
-                    n.meta.chain = parentNodeHasContinue && conditionResult ? 'continue' : 'break';
-                });
-                result.edges.forEach(edge => {
-                    edge.style = initEdgeStyle(parentNodeHasContinue && result.conditionResult);
-                });
+                if (!parentCombo) {
+                    result.nodes.forEach(n => {
+                        n.meta.chain = parentNodeHasContinue && result.conditionResult ? 'continue' : 'break';
+                    });
+                    result.edges.forEach(edge => {
+                        edge.style = initEdgeStyle(parentNodeHasContinue && result.conditionResult);
+                    });
+                }
             } else {
                 return result;
             }
