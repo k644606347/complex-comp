@@ -10,30 +10,68 @@ import {
     defineComponent,
     nextTick,
     onMounted,
+    PropType,
     useCssModule,
 } from "vue";
 import { parse } from "@babel/parser";
 import { Expression } from "@babel/types/lib/index";
-import G6 from "@antv/g6";
+import G6, { ComboConfig, EdgeConfig, NodeConfig, ShapeStyle } from "@antv/g6";
 
+type ICondition = {
+    seq: number;
+    result: boolean;
+    value: string;
+}
 type ChartData = {
-    nodes: Array<{
-        id: string;
-        label: string;
-        next?: string[];
+    nodes: Array<NodeConfig & {
+        meta: {
+            next?: string[];
+            seq?: number;
+        }
     }>;
-    edges: Array<{
-        source: string;
-        target: string;
-    }>;
+    edges: Array<EdgeConfig>;
+    combos: Array<ComboConfig>;
 };
 export default defineComponent({
     props: {
         code: {
             type: String,
-            default: "0 || 1 && 2 || 3 && 3 && ((4 && 5 || (5 && 6)) || 7) || 5 && 3",
+            // default: "3 || 1 && 2 || 3 && 3 && !((4 && 5 || !(5 && !6)) || 7) || 5 && 3 || 8 || 9 || 10 || (11 && 12 || !(13) && (14 || 15))",
+            // default: "3 || 1 && 2 || 3 && 3 && !((4 && 5 || !(5 && !6)) || 7) || !(8 || 9 || 10)",
+            default: '1 && 1.1 && 1.2 && !(2 || 3 || 4) && !(5 && 6) || (7 || !(4 && 8 || !(!2 || !10)))'
+            // default: '1 && (2 || 3 || 4) && 5'
         },
-    // code: { type: String, default: "1 || 2 || 3 && 4 || 5" },
+        // code: { type: String, default: "1 || 2 || 3 && 4 || 5" },
+        conditions: {
+            type: Array as PropType<ICondition[]>, 
+            default: () => ([
+                { 
+                    seq: 1,
+                    result: true,
+                    value: 'startTime > 123'
+                },
+                { 
+                    seq: 2,
+                    result: false,
+                    value: 'sourceId === "sss"'
+                },
+                { 
+                    seq: 3,
+                    result: false,
+                    value: 'timestamp > 4567'
+                },
+                { 
+                    seq: 4,
+                    result: true,
+                    value: 'endTime > 5555'
+                },
+                { 
+                    seq: 5,
+                    result: true,
+                    value: 'sourceId !== "hehe"'
+                },
+            ]) as ICondition[]
+        }
     },
     name: "ChartDemo",
     setup(props) {
@@ -51,24 +89,33 @@ export default defineComponent({
         });
 
         function codeToChart(code: string, ast: any) {
-            let result: ChartData = { nodes: [], edges: [] };
+            let result: ChartData = { nodes: [], edges: [], combos: [] };
 
-            const startNode = {
+            const startNode: ChartData['nodes'][number] = {
                 id: "start",
                 label: "开始",
+                meta: {},
+                linkPoints: {
+                    right: true,
+                },
             };
-            result = astToChartEdges(ast, startNode);
+            result = astToChartEdges(ast, [startNode]);
             result.nodes.push(startNode);
             result.nodes.push({
                 id: "end",
                 label: "结束",
+                meta: {},
             });
+            
+            const ignoreNodes = ['start', 'end'];
             result.nodes.forEach((node) => {
-                if (!node.next) {
-                    node.next = ["end"];
+                if (ignoreNodes.includes(node.id)) {return}
+                if (!node.meta.next) {
+                    node.meta.next = ["end"];
                     result.edges.push({
                         source: node.id,
                         target: "end",
+                        style: initEdgeStyle(props.conditions.find(condition => condition.seq === node.meta.seq)?.result),
                     });
                 }
             });
@@ -77,43 +124,76 @@ export default defineComponent({
 
         function astToChartEdges(
             expression: Expression,
-            parentNode: ChartData["nodes"][number]
+            parentNodes: ChartData["nodes"],
+            parentCombo?: string
         ) {
-            const result: ChartData = { nodes: [], edges: [] };
+            const result: ChartData = { nodes: [], edges: [], combos: [] };
             if (!expression) return result;
 
             if (expression.type === "LogicalExpression") {
-                const leftData = astToChartEdges(expression.left, parentNode);
+                // const parenthesized = expression.left.extra?.parenthesized;
+                const leftData = astToChartEdges(expression.left, parentNodes, parentCombo);
                 result.edges = result.edges.concat(leftData.edges);
                 result.nodes = result.nodes.concat(leftData.nodes);
-                const lastEdge = result.edges[result.edges.length - 1];
-
-                const rightData = astToChartEdges(
-                    expression.right,
-                    expression.operator === "&&"
-                        ? result.nodes.find((n) => n.id === lastEdge.target)!
-                        : parentNode
-                );
+                result.combos = result.combos.concat(leftData.combos);
+                // console.log('parenthesized', parenthesized)
+                const nextParents = expression.operator === "&&"
+                    ? result.nodes.filter(node => !node.meta?.next)
+                    : parentNodes;
+                // console.log('nextParents', nextParents, JSON.stringify(result.nodes))
+                const rightData = astToChartEdges(expression.right, nextParents, parentCombo);
                 result.edges = result.edges.concat(rightData.edges);
                 result.nodes = result.nodes.concat(rightData.nodes);
+                result.combos = result.combos.concat(rightData.combos);
             } else if (expression.type === "NumericLiteral") {
-                const nodeId =
-          new Date() +
-          "_" +
-          Math.ceil(Math.random() * 1000000).toString(16) +
-          "";
-                if (!parentNode.next) {
-                    parentNode.next = [];
-                }
-                parentNode.next.push(nodeId);
-                result.edges.push({
-                    source: parentNode.id,
-                    target: nodeId,
-                });
-                result.nodes.push({
-                    id: nodeId,
-                    label: "条件" + String(expression.value),
-                });
+                const nodeId = expression.value + '_' + Math.ceil(Math.random() * 100000000).toString(16);
+                parentNodes.forEach(parentNode => {
+                    if (!parentNode.meta.next) {
+                        parentNode.meta.next = [];
+                    }
+                    parentNode.meta.next.push(nodeId);
+                
+                    const parentConditionResult = parentNode.id === 'start' ? true : props.conditions.find(condtion => Number(condtion.seq) === Number(parentNode.meta.seq))?.result;
+                    const conditionResult = props.conditions.find(condtion => Number(condtion.seq) === Number(expression.value))?.result;
+                    console.log('parent', parentNode, props.conditions.find(condtion => Number(condtion.seq) === Number(parentNode.meta.seq)));
+                    console.log('cur', expression.value, props.conditions.find(condtion => Number(condtion.seq) === Number(expression.value))?.result)
+                    result.edges.push({
+                        source: parentNode.id,
+                        target: nodeId,
+                        style: initEdgeStyle(parentConditionResult && conditionResult),
+                    });
+                    result.nodes.push({
+                        comboId: parentCombo,
+                        id: nodeId,
+                        label: "条件" + String(expression.value),
+                        meta: {
+                            seq: expression.value,
+                        },
+                        labelCfg: {
+                            style: {
+                                fill: conditionResult ? '#30C453' : '#FA4E3E'
+                            }
+                        },
+                        linkPoints: {
+                            right: true,
+                        },
+                    });  
+                })
+            } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
+                const comboId = 'combo_' + Math.ceil(Math.random() * 1000000).toString(16);
+                result.combos.push({
+                    id: comboId,
+                    parentId: parentCombo,
+                    style: {
+                        fill: '#FFAA00',
+                        stroke: '#FFAA00',
+                        lineDash: [2],
+                    },
+                })
+                const children = astToChartEdges(expression.argument, parentNodes, comboId);
+                result.edges = result.edges.concat(children.edges);
+                result.nodes = result.nodes.concat(children.nodes);
+                result.combos = result.combos.concat(children.combos);
             } else {
                 return result;
             }
@@ -139,11 +219,27 @@ export default defineComponent({
     },
 });
 
+function initEdgeStyle(condtionResult?: boolean): ShapeStyle {
+    const color = condtionResult ? '#326BFB' : '#BBBDBF';
+    return {
+        // endArrow: true,
+        endArrow: {
+            path: G6.Arrow.triangle(6, 6, 0),
+            // path: "M 0,0 L 8,4 L 8,-4 Z",
+            fill: color,
+        },
+        stroke: color,
+        lineWidth: 1.5,
+        radius: 20,
+    }
+}
+
 function initChart(data: ChartData, $styles: Record<string, string>) {
     const container = document.getElementById("chart1")!;
-    const width = container.scrollWidth;
-    const height = container.scrollHeight || 500;
+    // const width = container.scrollWidth;
+    // const height = container.scrollHeight || 500;
 
+    const toolbar = new G6.ToolBar();
     const minimap = new G6.Minimap({
         size: [100, 100],
         className: $styles.minimap,
@@ -151,10 +247,11 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
     });
     const graph = new G6.Graph({
         container: container,
-        width,
-        height,
+        // width,
+        // height,
         fitView: true,
         fitCenter: true,
+        groupByTypes: false,
         modes: {
             default: [
                 "drag-canvas",
@@ -163,38 +260,44 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
                 "click-select",
             ],
         },
-        plugins: [minimap],
+        plugins: [minimap, toolbar],
         layout: {
             type: "dagre",
             rankdir: "LR",
-            align: "UL",
-            // controlPoints: true,
-            nodesepFunc: () => 1,
-            ranksepFunc: () => 1,
+            // align: "UL",
+            controlPoints: true,
+            sortByCombo: true,
+            // nodesepFunc: () => 20,
+            // ranksepFunc: () => 15,
         },
         defaultNode: {
-            size: [50, 20],
+            size: [85, 52],
+            // type: "alps",
             type: "rect",
             style: {
-                lineWidth: 2,
-                stroke: "#5B8FF9",
-                fill: "#C6E5FF",
+                fontSize: 14,
+                lineWidth: 1,
+                stroke: "#F0F2F5",
+                fill: "#fff",
+                radius: 4,
             },
-            stateStyles: {
-                hover: {
-                    fill: "#d3adf7",
-                },
+        },
+        nodeStateStyles: {
+            selected: {
+                stroke: '#326BFB',
+                lineWidth: 1.5,
             },
         },
         defaultEdge: {
             type: "polyline",
             size: 1,
+        },
+        defaultCombo: {
+            type: 'rect',
+            padding: 16,
             style: {
-                endArrow: {
-                    path: "M 0,0 L 8,4 L 8,-4 Z",
-                    fill: "#e2e2e2",
-                },
-                radius: 20,
+                fillOpacity: 0.1,
+                radius: 8,
             },
         },
     });
@@ -203,9 +306,14 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
 
     if (typeof window !== "undefined")
         window.onresize = () => {
-            if (!graph || graph.get("destroyed")) return;
-            if (!container || !container.scrollWidth || !container.scrollHeight)
+            console.log('resize');
+            if (!graph || graph.get("destroyed")) {
+                console.log('graph', graph);
                 return;
+            }
+            // if (!container || !container.scrollWidth || !container.scrollHeight)
+            //     return;
+            console.log(container.scrollWidth, container.scrollHeight);
             graph.changeSize(container.scrollWidth, container.scrollHeight);
         };
 }
@@ -218,6 +326,7 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
 .chart {
   flex: 1 1 auto;
   position: relative;
+  background-color: #F5F7FA;
 }
 .minimap {
   cursor: pointer;

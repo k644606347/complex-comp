@@ -12,12 +12,12 @@ import { defineComponent } from "vue";
 import router, { routes } from "./router";
 
 export default defineComponent({
-  name: 'App',
-  setup() {
-    return {
-      routes: routes
-    };
-  },
+    name: 'App',
+    setup() {
+        return {
+            routes: routes
+        };
+    },
 })
 </script>
 
