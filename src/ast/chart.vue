@@ -22,27 +22,31 @@ type ICondition = {
     result: boolean;
     value: string;
 }
+type IMeta = {
+    next: string[];
+    seq?: number;
+    chain: IChainStatus;
+    nodeType?: 'node' | 'combo';
+}
 type IChainStatus = 'continue' | 'break';
 type ChartData = {
     nodes: Array<NodeConfig & {
-        meta: {
-            next?: string[];
-            seq?: number;
-            chain: IChainStatus;
-        }
+        meta: IMeta;
     }>;
     edges: Array<EdgeConfig>;
-    combos: Array<ComboConfig>;
+    combos: Array<ComboConfig & {
+        meta: IMeta;
+    }>;
     conditionResult: boolean;
 };
 export default defineComponent({
     props: {
         code: {
             type: String,
-            default: "3 && 1 && 2 || 3 && !(!4 && 5 || !!(!6 && !3)) || 7 && 8 && !9 && 10 && (11 || 12) && !(13 && 14 || !15)",
+            // default: "3 && 1 && (2 || 3) && !(!4 && 5 || !!(!6 && !3)) || 7 && 8 && !9 && 10 && (11 || 12) && !(13 && 14 || !15)",
             // default: "3 || 1 && 2 || 3 && 3 && !((4 && 5 || !(5 && !6)) || 7) || !(8 || 9 || 10)",
             // default: '1 && !(2 || 3 || 4) && !(5 && 6) || (7 || !(4 && 8 || !(!2 || !10)))'
-            // default: '1 && (2 || 3 || 4) && 5'
+            default: '1 && !(2 || 3) && 5'
         },
         // code: { type: String, default: "1 || 2 || 3 && 4 || 5" },
         conditions: {
@@ -73,6 +77,21 @@ export default defineComponent({
                     result: true,
                     value: 'sourceId !== "hehe"'
                 },
+                { 
+                    seq: 6,
+                    result: true,
+                    value: 'source == "haha"'
+                },
+                { 
+                    seq: 7,
+                    result: true,
+                    value: 'sourceId !== "hihi"'
+                },
+                { 
+                    seq: 8,
+                    result: true,
+                    value: 'sourceId'
+                },
             ]) as ICondition[]
         }
     },
@@ -98,26 +117,30 @@ export default defineComponent({
                 id: "start",
                 label: "开始",
                 meta: {
+                    next: [],
                     chain: 'continue',
                 },
                 linkPoints: {
                     right: true,
                 },
             };
-            result = astToChartEdges(ast, [startNode]);
+            result = astToChartEdges(ast, {
+                prevNodes: [startNode]
+            });
             result.nodes.push(startNode);
             result.nodes.push({
                 id: "end",
                 label: "结束",
                 meta: {
+                    next: [],
                     chain: 'continue',
                 },
             });
             
             const ignoreNodes = ['start', 'end'];
-            result.nodes.forEach((node) => {
+            [...result.nodes, ...result.combos].forEach((node) => {
                 if (ignoreNodes.includes(node.id)) {return}
-                if (!node.meta.next) {
+                if (node.meta.next.length === 0 && !node.parentId) {
                     node.meta.next = ["end"];
                     result.edges.push({
                         source: node.id,
@@ -131,26 +154,40 @@ export default defineComponent({
 
         function astToChartEdges(
             expression: Expression,
-            parentNodes: ChartData["nodes"],
-            parentCombo?: string
+            options: {
+                parentCombo?: ChartData['combos'][number];
+                rootCombo?: ChartData['combos'][number];
+                prevNodes?: ChartData['nodes'] | ChartData['combos'];
+            }
         ) {
             const result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false };
             if (!expression) return result;
 
-            const parentNodeHasContinue = parentNodes.some(n => n.meta.chain === 'continue');
+            const prevNodesHasContinue = options.prevNodes?.some(n => n.meta.chain === 'continue');
 
+            console.log('expr', expression)
             if (expression.type === "LogicalExpression") {
                 // const parenthesized = expression.left.extra?.parenthesized;
                 // console.log('parenthesized', parenthesized)
-                const leftData = astToChartEdges(expression.left, parentNodes, parentCombo);
+                const leftData = astToChartEdges(expression.left, {
+                    prevNodes: options.prevNodes,
+                    parentCombo: options.parentCombo,
+                    rootCombo: options.rootCombo,
+                });
                 result.edges = result.edges.concat(leftData.edges);
                 result.nodes = result.nodes.concat(leftData.nodes);
                 result.combos = result.combos.concat(leftData.combos);
-                const nextParents = expression.operator === "&&"
-                    ? result.nodes.filter(node => !node.meta?.next)
-                    : parentNodes;
-
-                const rightData = astToChartEdges(expression.right, nextParents, parentCombo);
+                const prevNodes = expression.operator === "&&"
+                    ? [...result.nodes, ...result.combos].filter(node => {
+                        return !node.parentId && node.meta.next.length === 0;
+                    })
+                    : options.prevNodes;
+                console.log('prevNodes', prevNodes)
+                const rightData = astToChartEdges(expression.right, {
+                    prevNodes,
+                    parentCombo: options.parentCombo,
+                    rootCombo: options.rootCombo,
+                });
                 result.edges = result.edges.concat(rightData.edges);
                 result.nodes = result.nodes.concat(rightData.nodes);
                 result.combos = result.combos.concat(rightData.combos);
@@ -158,29 +195,41 @@ export default defineComponent({
             } else if (expression.type === "NumericLiteral") {
                 const nodeId = expression.value + '_' + Math.ceil(Math.random() * 100000000).toString(16);
                 const conditionResult = props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result;
-                parentNodes.forEach(parentNode => {
-                    if (!parentNode.meta.next) {
-                        parentNode.meta.next = [];
-                    }
-                    parentNode.meta.next.push(nodeId);
+                if (options.prevNodes) {
+                    options.prevNodes.forEach(prevNode => {
+                        prevNode.meta.next.push(nodeId);
                 
-                    console.log('parent', parentNode, props.conditions.find(condition => Number(condition.seq) === Number(parentNode.meta.seq)));
-                    console.log('cur', expression.value, props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result)
+                        // console.log('parent', prevNode, props.conditions.find(condition => Number(condition.seq) === Number(prevNode.meta.seq)));
+                        // console.log('cur', expression.value, props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result)
 
+                        result.edges.push({
+                            source: prevNode.id,
+                            target: nodeId,
+                            style: initEdgeStyle(prevNodesHasContinue),
+                            sourceAnchor: 1,
+                            type: prevNode.meta.nodeType === 'combo' ? 'line' : 'polyline',
+                            targetAnchor: 0
+                        });
+                    })
+                } else if (options.rootCombo) {
                     result.edges.push({
-                        source: parentNode.id,
+                        source: options.rootCombo.id,
                         target: nodeId,
-                        style: initEdgeStyle(parentNodeHasContinue),
+                        style: initEdgeStyle(prevNodesHasContinue),
+                        sourceAnchor: 0,
+                        type: 'line',
+                        targetAnchor: 0
                     });
-                })
+                }
 
                 result.nodes.push({
-                    comboId: parentCombo,
+                    comboId: options.parentCombo?.id,
                     id: nodeId,
                     label: "条件" + String(expression.value),
                     meta: {
                         seq: expression.value,
-                        chain: parentNodeHasContinue && conditionResult ? 'continue' : 'break',
+                        next: [],
+                        chain: prevNodesHasContinue && conditionResult ? 'continue' : 'break',
                     },
                     labelCfg: {
                         style: {
@@ -194,26 +243,58 @@ export default defineComponent({
                 result.conditionResult = Boolean(conditionResult);
             } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
                 const comboId = 'combo_' + Math.ceil(Math.random() * 1000000).toString(16);
-                result.combos.push({
+                const combo: ChartData['combos'][number] = {
                     id: comboId,
-                    parentId: parentCombo,
+                    parentId: options.parentCombo?.id,
                     style: {
                         fill: '#FFAA00',
                         stroke: '#FFAA00',
                         lineDash: [2],
                     },
-                })
-                const children = astToChartEdges(expression.argument, parentNodes, comboId);
+                    meta: {
+                        next: [],
+                        chain: 'break',
+                        nodeType: 'combo'
+                    }
+                };
+
+                result.combos.push(combo);
+                options.prevNodes?.forEach(n => {
+                    n.meta.next.push(comboId)
+                    result.edges.push({
+                        source: n.id,
+                        target: comboId,
+                        style: initEdgeStyle(prevNodesHasContinue),
+                        sourceAnchor: 1,
+                        targetAnchor: 0
+                    });
+                });
+                const children = astToChartEdges(expression.argument, {
+                    parentCombo: combo,
+                    rootCombo: options.parentCombo ? options.rootCombo : combo,
+                });
                 result.conditionResult = !children.conditionResult;
                 result.edges = result.edges.concat(children.edges);
                 result.nodes = result.nodes.concat(children.nodes);
                 result.combos = result.combos.concat(children.combos);
-                if (!parentCombo) {
+                if (!options.parentCombo) {
                     result.nodes.forEach(n => {
-                        n.meta.chain = parentNodeHasContinue && result.conditionResult ? 'continue' : 'break';
+                        if (n.meta.next.length === 0) {
+                            n.meta.next.push(comboId);
+                            result.edges.push({
+                                type: 'line',
+                                source: n.id,
+                                target: comboId,
+                                sourceAnchor: 1,
+                                targetAnchor: 1,
+                            })
+                        }
+                    });
+                    result.nodes.forEach(n => {
+                        n.meta.chain = prevNodesHasContinue && result.conditionResult ? 'continue' : 'break';
                     });
                     result.edges.forEach(edge => {
-                        edge.style = initEdgeStyle(parentNodeHasContinue && result.conditionResult);
+                        edge.style = initEdgeStyle(prevNodesHasContinue && result.conditionResult);
                     });
                 }
             } else {
@@ -245,11 +326,11 @@ function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
     const color = conditionResult ? '#326BFB' : '#BBBDBF';
     return {
         // endArrow: true,
-        endArrow: {
-            path: G6.Arrow.triangle(6, 6, 0),
-            // path: "M 0,0 L 8,4 L 8,-4 Z",
-            fill: color,
-        },
+        // endArrow: {
+        //     path: G6.Arrow.triangle(6, 6, 0),
+        //     // path: "M 0,0 L 8,4 L 8,-4 Z",
+        //     fill: color,
+        // },
         stroke: color,
         lineWidth: 1.5,
         radius: 10,
@@ -280,18 +361,18 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
                 "drag-node",
                 "zoom-canvas",
                 "click-select",
-                // 'drag-combo',
+                'drag-combo',
             ],
         },
         plugins: [minimap, toolbar],
         layout: {
             type: "dagre",
             rankdir: "LR",
-            // align: "UL",
+            align: "DL",
             // controlPoints: true,
             // sortByCombo: true,
-            // nodesepFunc: () => 20,
-            // ranksepFunc: () => 15,
+            nodesepFunc: () => 20,
+            ranksepFunc: () => 15,
         },
         defaultNode: {
             size: [85, 52],
