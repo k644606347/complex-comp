@@ -216,7 +216,7 @@ export default defineComponent({
                 })
                 result.conditionResult = conditionResult;
             } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
-                const comboId = 'combo_' + Math.ceil(Math.random() * 1000000).toString(16);
+                const comboId = 'combo_' + genId();
                 const combo: ChartData['combos'][number] = {
                     id: comboId,
                     parentId: options.parentCombo?.id,
@@ -297,7 +297,7 @@ export default defineComponent({
                             result.edges.push({
                                 source: n.id,
                                 target: comboOutputNode.id,
-                                style: initEdgeStyle(isContinue)
+                                style: initEdgeStyle(isContinue),
                             })
                         }
                     });
@@ -339,7 +339,7 @@ function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
             fill: color,
         },
         stroke: color,
-        lineWidth: 1.5,
+        lineWidth: conditionResult ? 2 : 1.5,
         radius: 6,
     }
 }
@@ -349,9 +349,10 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
     // const width = container.scrollWidth;
     // const height = container.scrollHeight || 500;
 
-    const toolbar = new G6.ToolBar();
+    const toolbar = new G6.ToolBar({
+        className: $styles.toolbar,
+    });
     const minimap = new G6.Minimap({
-        size: [100, 100],
         className: $styles.minimap,
         type: "delegate",
     });
@@ -365,10 +366,10 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
         modes: {
             default: [
                 "drag-canvas",
-                "drag-node",
+                // "drag-node",
                 "zoom-canvas",
                 "click-select",
-                'drag-combo',
+                // 'drag-combo',
             ],
         },
         plugins: [minimap, toolbar],
@@ -396,10 +397,22 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
                 stroke: "#F0F2F5",
                 fill: "#fff",
                 radius: 4,
+                shadowOffsetX: 0,
+                shadowOffsetY: 2,
+                shadowBlur: 4,
+                shadowColor: 'rgba(12, 18, 31, 0.06)',
             },
         },
         nodeStateStyles: {
-            selected: {
+            // click 状态为 true 时的样式
+            click: {
+                stroke: '#326BFB',
+                lineWidth: 1.5,
+                shadowColor: '#326BFB'
+            },
+            // hover 状态为 true 时的样式
+            hover: {
+                cursor: 'pointer',
                 stroke: '#326BFB',
                 lineWidth: 1.5,
             },
@@ -420,6 +433,28 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
     graph.data(data);
     graph.render();
 
+    graph.on('node:mouseenter', (e) => {
+        const nodeItem = e.item;
+        // 设置目标节点的 hover 状态 为 true
+        nodeItem && graph.setItemState(nodeItem, 'hover', true);
+    });
+    // 监听鼠标离开节点
+    graph.on('node:mouseleave', (e) => {
+        const nodeItem = e.item;
+        // 设置目标节点的 hover 状态 false
+        nodeItem && graph.setItemState(nodeItem, 'hover', false);
+    });
+
+    graph.on('node:click', (e) => {
+        // 先将所有当前有 click 状态的节点的 click 状态置为 false
+        const clickNodes = graph.findAllByState('node', 'click');
+        clickNodes.forEach((cn) => {
+            graph.setItemState(cn, 'click', false);
+        });
+        const nodeItem = e.item;
+        // 设置目标节点的 click 状态 为 true
+        nodeItem && graph.setItemState(nodeItem, 'click', true);
+    });
     // graph.on('afterlayout', e => {
     //     const combos = graph.getCombos();
     //     graph.getNodes().forEach(node => {
@@ -464,7 +499,11 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
 }
 
 function genNodeId(expression: number | string) {
-    return expression + '_' + Math.ceil(Math.random() * 100000000).toString(16);
+    return expression + '_' + genId();
+}
+
+function genId() {
+    return  String(Math.ceil(Math.random() * 100000000).toString(16)).padEnd(7, '0');
 }
 </script>
 <style lang="less" module>
@@ -480,13 +519,44 @@ function genNodeId(expression: number | string) {
 .minimap {
   cursor: pointer;
   position: absolute;
-  bottom: 0;
-  left: 0;
+  bottom: 24px;
+  left: 24px;
   width: 270px;
   height: 152px;
   background: #fff;
   box-shadow: 0px 16px 28px 3px rgba(0, 0, 0, 0.05),
     0px 8px 33px 7px rgba(0, 0, 0, 0.02), 0px 8px 15px -9px rgba(0, 0, 0, 0.04);
   border-radius: 4px;
+}
+.toolbar {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    flex-direction: column;
+    row-gap: 16px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    > li {
+        border: 1px solid transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        background: #fff;
+        box-shadow: 0px 16px 28px 3px rgba(0, 0, 0, 0.05), 0px 8px 33px 7px rgba(0, 0, 0, 0.02), 0px 8px 15px -9px rgba(0, 0, 0, 0.04);
+        border-radius: 4px;
+        cursor: pointer;
+        &:hover {
+            border-color: #326BFB;
+        }
+    }
+    :global {
+        [code="redo"], [code="undo"] {
+            display: none;
+        }
+    }
 }
 </style>
