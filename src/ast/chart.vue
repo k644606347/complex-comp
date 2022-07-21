@@ -1,7 +1,7 @@
 <template>
-  <div :class="$style.wrap">
-    <div>{{ value }}</div>
-    <div id="chart1" :class="$style.chart"></div>
+  <div :class="$style.wrap" ref="wrapRef">
+    <div :class="$style['condition-content']" v-html="conditionHtml"></div>
+    <div ref="chartRef" :class="$style.chart"></div>
   </div>
 </template>
 <script lang="ts">
@@ -11,11 +11,14 @@ import {
     nextTick,
     onMounted,
     PropType,
+    Ref,
+    ref,
     useCssModule,
+    watchEffect,
 } from "vue";
 import { parse } from "@babel/parser";
 import { Expression } from "@babel/types/lib/index";
-import G6, { ComboConfig, EdgeConfig, NodeConfig, ShapeStyle } from "@antv/g6";
+import G6, { ComboConfig, EdgeConfig, IG6GraphEvent, Item, ITEM_TYPE, NodeConfig, ShapeStyle } from "@antv/g6";
 
 type ICondition = {
     seq: number;
@@ -36,6 +39,7 @@ type ChartData = {
     edges: Array<EdgeConfig>;
     combos: Array<ComboConfig>;
     conditionResult: boolean;
+    conditionHtml: string;
 };
 export default defineComponent({
     props: {
@@ -95,6 +99,9 @@ export default defineComponent({
     },
     name: "ChartDemo",
     setup(props) {
+        const wrapRef = ref<HTMLElement>();
+        const chartRef = ref<HTMLElement>();
+        const conditionHtml = ref('');
         const ast = computed(() => {
             const edges = parse(props.value, {
                 // createParenthesizedExpressions: true,
@@ -109,7 +116,7 @@ export default defineComponent({
         });
 
         function codeToChart(value: string, ast: any) {
-            let result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false };
+            let result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false, conditionHtml: '' };
 
             const startNode: MyNodeConfig = {
                 id: "start",
@@ -122,7 +129,7 @@ export default defineComponent({
                     right: true,
                 },
             };
-            result = astToChartEdges(ast, {
+            result = astToChart(ast, {
                 prevNodes: [startNode]
             });
             result.nodes.push(startNode);
@@ -150,22 +157,21 @@ export default defineComponent({
             return result;
         }
 
-        function astToChartEdges(
+        function astToChart(
             expression: Expression,
             options: {
                 parentCombo?: ChartData['combos'][number];
                 prevNodes: ChartData['nodes'];
             }
         ) {
-            const result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false };
+            const result: ChartData = { nodes: [], edges: [], combos: [], conditionResult: false, conditionHtml: '' };
             if (!expression) return result;
 
             const prevNodesHasContinue = options.prevNodes?.some(n => n.meta.chain === 'continue');
 
             if (expression.type === "LogicalExpression") {
-                // const parenthesized = expression.left.extra?.parenthesized;
-                // console.log('parenthesized', parenthesized)
-                const leftData = astToChartEdges(expression.left, {
+                const parenthesized = expression.extra?.parenthesized;
+                const leftData = astToChart(expression.left, {
                     prevNodes: options.prevNodes,
                     parentCombo: options.parentCombo,
                 });
@@ -174,7 +180,7 @@ export default defineComponent({
                         return node.meta.next.length === 0;
                     })
                     : options.prevNodes;
-                const rightData = astToChartEdges(expression.right, {
+                const rightData = astToChart(expression.right, {
                     prevNodes,
                     parentCombo: options.parentCombo,
                 });
@@ -184,6 +190,10 @@ export default defineComponent({
                 result.combos = result.combos.concat(leftData.combos, rightData.combos);
 
                 result.conditionResult = expression.operator === "&&" ? (leftData.conditionResult && rightData.conditionResult) : (leftData.conditionResult || rightData.conditionResult);
+                result.conditionHtml = leftData.conditionHtml + '<span>' + expression.operator + '</span>' + rightData.conditionHtml;
+                if (parenthesized) {
+                    result.conditionHtml = `<span>(${result.conditionHtml})</span>`
+                }
             } else if (expression.type === "NumericLiteral") {
                 const nodeId = genNodeId(expression.value);
                 const conditionResult = Boolean(props.conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result);
@@ -214,7 +224,8 @@ export default defineComponent({
                         right: true,
                     },
                 })
-                result.conditionResult = conditionResult;
+                result.conditionResult = conditionResult
+                result.conditionHtml = `<span class="${$style.item}" data-item-id="${nodeId}" data-item-type="node">${expression.value}</span>`
             } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
                 const comboId = 'combo_' + genId();
                 const combo: ChartData['combos'][number] = {
@@ -258,11 +269,12 @@ export default defineComponent({
                         })
                     })
                 }
-                const children = astToChartEdges(expression.argument, {
+                const children = astToChart(expression.argument, {
                     parentCombo: combo,
                     prevNodes,
                 });
                 result.conditionResult = !children.conditionResult;
+                result.conditionHtml = `<span class="${$style.item}" data-item-id="${comboId}" data-item-type="combo">!${children.conditionHtml}</span>`;
                 result.edges = result.edges.concat(children.edges);
                 result.nodes = result.nodes.concat(children.nodes);
                 result.combos = result.combos.concat(children.combos);
@@ -312,22 +324,127 @@ export default defineComponent({
         }
 
         const $style = useCssModule();
-        const chartData = computed(() => {
-            const data = codeToChart(props.value, ast.value);
-            return data;
-        });
+        const chartData = ref(initChartData()) as Ref<ChartData>;
+        
+        watchEffect(() => {
+            const data = chartData.value = codeToChart(props.value, ast.value);
+            conditionHtml.value = data.conditionHtml
+        })
 
         onMounted(async () => {
             await nextTick();
-            initChart(chartData.value, $style);
+            const wrapEl = wrapRef.value;
+            const chartEl = chartRef.value;
+            if (!wrapEl || !chartEl) {
+                return;
+            }
+
+            const graph = initChart(chartData.value, { $style, container: chartEl });
+            // (window as any)._graph = graph
+
+            const canSelectTypes: ITEM_TYPE[] = ['node', 'combo'];
+
+            graph.on('mouseenter', (e) => {
+                const item = e.item;
+                if (!item || !canSelectTypes.includes(item.getType())) {
+                    return;
+                }
+                graph.setItemState(item, 'hover', true);
+            });
+            graph.on('mouseleave', (e) => {
+                const item = e.item;
+                if (!item || !canSelectTypes.includes(item.getType())) {
+                    return;
+                }
+                graph.setItemState(item, 'hover', false);
+            });
+
+            canSelectTypes.forEach(type => {
+                graph.on(type+':click', onItemClick);
+            })
+
+            function onItemClick(e: IG6GraphEvent) {
+                const item = e.item;
+                if (!wrapEl || !item) {
+                    return;
+                }
+
+                const state = 'selected';
+
+                const activeStyle = $style['active-item'];
+                const isSelected = item.hasState(state)
+                if (isSelected) {
+                    graph.setItemState(item, state, false)
+                    wrapEl.querySelector<HTMLElement>(`[data-item-id="${item.getID()}"]`)?.classList.remove(activeStyle)
+                } else {
+                    graph.findAllByState(item.getType(), state).forEach((item) => {
+                        graph.setItemState(item, state, false);
+                    })
+                    graph.setItemState(item, state, true)
+
+                    wrapEl.querySelectorAll<HTMLElement>(`[data-item-id]`).forEach(el => {
+                        const { dataset, classList } = el;
+
+                        dataset.itemId === item.getID() 
+                            ? classList.add(activeStyle) 
+                            : classList.remove(activeStyle)
+                    })
+                }
+            }
+
+            wrapEl.addEventListener('click', (e) => {
+                const target = e.target as HTMLElement | undefined;
+                if (!target || !target.dataset.itemId) {
+                    return;
+                }
+
+                const itemId = target.dataset.itemId;
+                const itemType = target.dataset.itemType as ITEM_TYPE | undefined;
+                
+                const state = 'selected';
+
+                wrapEl.querySelectorAll<HTMLElement>(`[data-item-id]`).forEach(el => {
+                    const activeStyle = $style['active-item'];
+                    const { dataset, classList } = el;
+
+                    dataset.itemId === itemId
+                        ? classList.add(activeStyle) 
+                        : classList.remove(activeStyle)
+                })
+
+                if (itemType) {
+                    const clickItems = canSelectTypes.reduce((prev, cur) => {
+                        return prev.concat(graph.findAllByState(cur, state))
+                    }, [] as Item[]);
+
+                    clickItems.forEach((cn) => {
+                        graph.setItemState(cn, state, false);
+                    });
+                }
+
+                const item = graph.findById(itemId)
+                if (item) {
+                    graph.setItemState(item , state, true)
+                    graph.focusItem(item, true, {
+                        easing: 'easeCubic',
+                        duration: 400,
+                    })
+                }
+            });
         });
 
         return {
+            wrapRef,
+            chartRef,
             ast,
-            chartData,
+            conditionHtml,
         };
     },
 });
+
+function initChartData(): ChartData {
+    return { nodes: [], edges: [], combos: [], conditionResult: false, conditionHtml: '' };
+}
 
 function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
     const color = conditionResult ? '#326BFB' : '#BBBDBF';
@@ -344,16 +461,19 @@ function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
     }
 }
 
-function initChart(data: ChartData, $styles: Record<string, string>) {
-    const container = document.getElementById("chart1")!;
+function initChart(data: ChartData, 
+    { $style, container }: { 
+        $style: Record<string, string>;
+        container: HTMLElement
+    }) {
     // const width = container.scrollWidth;
     // const height = container.scrollHeight || 500;
 
     const toolbar = new G6.ToolBar({
-        className: $styles.toolbar,
+        className: $style.toolbar,
     });
     const minimap = new G6.Minimap({
-        className: $styles.minimap,
+        className: $style.minimap,
         type: "delegate",
     });
     const graph = new G6.Graph({
@@ -368,7 +488,7 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
                 "drag-canvas",
                 // "drag-node",
                 "zoom-canvas",
-                "click-select",
+                // "click-select",
                 // 'drag-combo',
             ],
         },
@@ -404,15 +524,33 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
             },
         },
         nodeStateStyles: {
-            // click 状态为 true 时的样式
-            click: {
+            selected: {
                 stroke: '#326BFB',
-                lineWidth: 1.5,
-                shadowColor: '#326BFB'
+                lineWidth: 2,
+                shadowColor: '#326BFB',
+                shadowBlur: 4,
             },
-            // hover 状态为 true 时的样式
             hover: {
                 cursor: 'pointer',
+                stroke: '#326BFB',
+                lineWidth: 1.5,
+            },
+        },
+        defaultCombo: {
+            type: 'rect',
+            padding: 16,
+            style: {
+                fillOpacity: 0.1,
+                radius: 8,
+                cursor: 'pointer',
+            },
+        },
+        comboStateStyles: {
+            selected: {
+                stroke: '#326BFB',
+                shadowBlur: 1,
+            },
+            hover: {
                 stroke: '#326BFB',
                 lineWidth: 1.5,
             },
@@ -421,40 +559,9 @@ function initChart(data: ChartData, $styles: Record<string, string>) {
             type: "polyline",
             size: 1,
         },
-        defaultCombo: {
-            type: 'rect',
-            padding: 16,
-            style: {
-                fillOpacity: 0.1,
-                radius: 8,
-            },
-        },
     });
     graph.data(data);
     graph.render();
-
-    graph.on('node:mouseenter', (e) => {
-        const nodeItem = e.item;
-        // 设置目标节点的 hover 状态 为 true
-        nodeItem && graph.setItemState(nodeItem, 'hover', true);
-    });
-    // 监听鼠标离开节点
-    graph.on('node:mouseleave', (e) => {
-        const nodeItem = e.item;
-        // 设置目标节点的 hover 状态 false
-        nodeItem && graph.setItemState(nodeItem, 'hover', false);
-    });
-
-    graph.on('node:click', (e) => {
-        // 先将所有当前有 click 状态的节点的 click 状态置为 false
-        const clickNodes = graph.findAllByState('node', 'click');
-        clickNodes.forEach((cn) => {
-            graph.setItemState(cn, 'click', false);
-        });
-        const nodeItem = e.item;
-        // 设置目标节点的 click 状态 为 true
-        nodeItem && graph.setItemState(nodeItem, 'click', true);
-    });
     // graph.on('afterlayout', e => {
     //     const combos = graph.getCombos();
     //     graph.getNodes().forEach(node => {
@@ -510,12 +617,37 @@ function genId() {
 .wrap {
   display: flex;
   flex-direction: column;
+  font-size: 14px;
 }
+
+.condition-content {
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    line-height: 24px;
+    span {
+        padding: 0 2px;
+    }
+    .item {
+        cursor: pointer;
+        border-radius: 4px;
+        &.active-item {
+            background-color: #326BFB;
+            color: #fff;
+        }
+    }
+}
+
 .chart {
   flex: 1 1 auto;
   position: relative;
   background-color: #F5F7FA;
 }
+
+.condition-content + .chart {
+    margin-top: 16px;
+}
+
 .minimap {
   cursor: pointer;
   position: absolute;
@@ -528,6 +660,7 @@ function genId() {
     0px 8px 33px 7px rgba(0, 0, 0, 0.02), 0px 8px 15px -9px rgba(0, 0, 0, 0.04);
   border-radius: 4px;
 }
+
 .toolbar {
     position: absolute;
     bottom: 24px;
