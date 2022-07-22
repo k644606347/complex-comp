@@ -23,8 +23,12 @@ export default defineComponent({
     props: {
         value: {
             type: String,
-            default: ''
+            default: "3 && 1 && (2 || 13) && !(!4 && 5 || !!(!6 && !3)) || 7 && 8 && !9 && 10 && (11 || 12) && !(13 && 14 || !15)",
+            // default: "3 || 1 && 2 || 3 && 3 && !((4 && 5 || !(5 && !6)) || 7) || !(8 || 9 || 10)",
+            // default: '1 && !(2 || 3 || 4) && !(5 && 6) || (7 || !(4 && 8 || !(!2 || !10)))'
+            // default: '1 && !(2 || 3) && 5'
         },
+        // value: { type: String, default: "1 || 2 || 3 && 4 || 5" },
         conditions: {
             type: Array as PropType<ICondition[]>, 
             default: () => ([]) as ICondition[]
@@ -61,6 +65,7 @@ export default defineComponent({
                 // createParenthesizedExpressions: true,
                 tokens: true,
             });
+            console.log("ast", ast);
             const firstNode = ast.program.body[0];
             const expression = firstNode.type === "ExpressionStatement" ? firstNode.expression : null;
             return expression;
