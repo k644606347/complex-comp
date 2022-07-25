@@ -38,9 +38,13 @@ export default defineComponent({
             ast: Object.freeze(genAst(props.value)),
             chartData: Object.freeze(genChartData(ast)),
             dispatch(...args) {
+                console.log(args);
                 emit(...args);
             },
-            wrapEl: undefined
+            wrapEl: undefined,
+            getConditions() {
+                return props.conditions;
+            },
         });
         provide(contextKey, context)
         

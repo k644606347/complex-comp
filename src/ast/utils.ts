@@ -1,14 +1,20 @@
-import G6, { EdgeConfig, NodeConfig, ComboConfig, ShapeStyle } from '@antv/g6';
-import { Expression } from "@babel/types/lib/index";
+import G6, { EdgeConfig, NodeConfig, ComboConfig, ShapeStyle, ITEM_TYPE } from '@antv/g6';
+import { Expression } from '@babel/types/lib/index';
 import { inject } from 'vue';
 
 export type IEmit = 'click' | 'select' | 'unselect' | 'hover';
-export const emits: IEmit[] = ['click', 'select', 'unselect', 'hover'];
+export const emits: IEmit[] = [ 'click', 'select', 'unselect', 'hover' ];
+export type IEvent = {
+    seq?: number;
+    condition?: ICondition;
+    itemType: ITEM_TYPE;
+};
 
 export type IConditionChartContext = {
     ast: Readonly<Expression | null>;
     chartData: Readonly<IChartData>;
     dispatch(e: IEmit, ...args: any[]): void;
+    getConditions(): ICondition[];
     wrapEl?: HTMLElement;
 }
 export const contextKey = 'rcp_condition_chart_context';
@@ -55,15 +61,15 @@ export function initEdgeStyle(conditionResult?: boolean): ShapeStyle {
         stroke: color,
         lineWidth: conditionResult ? 2 : 1.5,
         radius: 6,
-    }
+    };
 }
 
 export function astToChartData(ast: Expression, conditions: ICondition[]): IChartData {
     let result: IChartData = { nodes: [], edges: [], combos: [], conditionResult: false, conditionHtml: '' };
 
     const startNode: MyNodeConfig = {
-        id: "start",
-        label: "开始",
+        id: 'start',
+        label: '开始',
         meta: {
             next: [],
             chain: 'continue',
@@ -73,26 +79,26 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
         },
     };
 
-    result = _recursition(ast, { prevNodes: [startNode] });
+    result = _recursition(ast, { prevNodes: [ startNode ] });
 
     result.nodes.push(startNode);
     result.nodes.push({
-        id: "end",
-        label: "结束",
+        id: 'end',
+        label: '结束',
         meta: {
             next: [],
             chain: 'continue',
         },
     });
-    
-    const ignoreNodes = ['start', 'end'];
-    result.nodes.forEach((node) => {
-        if (ignoreNodes.includes(node.id)) {return}
+
+    const ignoreNodes = [ 'start', 'end' ];
+    result.nodes.forEach(node => {
+        if (ignoreNodes.includes(node.id)) {return;}
         if (node.meta.next.length === 0) {
-            node.meta.next = ["end"];
+            node.meta.next = [ 'end' ];
             result.edges.push({
                 source: node.id,
-                target: "end",
+                target: 'end',
                 style: initEdgeStyle(node.meta.chain === 'continue'),
             });
         }
@@ -103,21 +109,21 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
         options: {
             parentCombo?: IChartData['combos'][number];
             prevNodes: IChartData['nodes'];
-        }
+        },
     ) {
         const result: IChartData = { nodes: [], edges: [], combos: [], conditionResult: false, conditionHtml: '' };
-        if (!expression) return result;
+        if (!expression) {return result;}
 
         const prevNodesHasContinue = options.prevNodes?.some(n => n.meta.chain === 'continue');
 
-        if (expression.type === "LogicalExpression") {
+        if (expression.type === 'LogicalExpression') {
             const parenthesized = expression.extra?.parenthesized;
             const leftData = _recursition(expression.left, {
                 prevNodes: options.prevNodes,
                 parentCombo: options.parentCombo,
             });
-            const prevNodes = expression.operator === "&&" ?
-                leftData.nodes.filter(node => {
+            const prevNodes = expression.operator === '&&'
+                ? leftData.nodes.filter(node => {
                     return node.meta.next.length === 0;
                 })
                 : options.prevNodes;
@@ -130,12 +136,12 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
             result.nodes = result.nodes.concat(leftData.nodes, rightData.nodes);
             result.combos = result.combos.concat(leftData.combos, rightData.combos);
 
-            result.conditionResult = expression.operator === "&&" ? (leftData.conditionResult && rightData.conditionResult) : (leftData.conditionResult || rightData.conditionResult);
+            result.conditionResult = expression.operator === '&&' ? (leftData.conditionResult && rightData.conditionResult) : (leftData.conditionResult || rightData.conditionResult);
             result.conditionHtml = leftData.conditionHtml + '<span>' + expression.operator + '</span>' + rightData.conditionHtml;
             if (parenthesized) {
-                result.conditionHtml = `<span>(${result.conditionHtml})</span>`
+                result.conditionHtml = `<span>(${result.conditionHtml})</span>`;
             }
-        } else if (expression.type === "NumericLiteral") {
+        } else if (expression.type === 'NumericLiteral') {
             const nodeId = genNodeId(expression.value);
             const conditionResult = Boolean(conditions.find(condition => Number(condition.seq) === Number(expression.value))?.result);
             options.prevNodes.forEach(prevNode => {
@@ -146,11 +152,11 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                     target: nodeId,
                     style: initEdgeStyle(prevNode.meta.chain === 'continue'),
                 });
-            })
+            });
             result.nodes.push({
                 comboId: options.parentCombo?.id,
                 id: nodeId,
-                label: "条件" + String(expression.value),
+                label: '条件' + String(expression.value),
                 meta: {
                     seq: expression.value,
                     next: [],
@@ -158,15 +164,15 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                 },
                 labelCfg: {
                     style: {
-                        fill: conditionResult ? '#30C453' : '#FA4E3E'
-                    }
+                        fill: conditionResult ? '#30C453' : '#FA4E3E',
+                    },
                 },
                 linkPoints: {
                     right: true,
                 },
-            })
-            result.conditionResult = conditionResult
-            result.conditionHtml = `<span class="rcp-condition-chart-item" data-item-id="${nodeId}" data-item-type="node">${expression.value}</span>`
+            });
+            result.conditionResult = conditionResult;
+            result.conditionHtml = `<span class="rcp-condition-chart-item" data-item-id="${nodeId}" data-item-type="node">${expression.value}</span>`;
         } else if (expression.type === 'UnaryExpression' && expression.operator === '!') {
             const comboId = 'combo_' + genId();
             const combo: IChartData['combos'][number] = {
@@ -175,7 +181,7 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                 style: {
                     fill: '#FFAA00',
                     stroke: '#FFAA00',
-                    lineDash: [2],
+                    lineDash: [ 2 ],
                 },
             };
 
@@ -187,7 +193,7 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                     size: 8,
                     id: genNodeId('combo_input[' + comboId + ']'),
                     style: {
-                        stroke: '#326BFB'
+                        stroke: '#326BFB',
                     },
                     meta: {
                         next: [],
@@ -198,17 +204,17 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                 //     [0.5, 0],
                 //     [0.5, 1],
                 // ],
-                }
-                prevNodes = [comboInputNode]
-                result.nodes.push(comboInputNode)
-            options.prevNodes?.forEach(prevNode => {
-                prevNode.meta.next.push(comboInputNode.id)
-                result.edges.push({
-                    source: prevNode.id,
-                    target: comboInputNode.id,
-                    style: initEdgeStyle(prevNode.meta.chain === 'continue'),
-                })
-            })
+                };
+                prevNodes = [ comboInputNode ];
+                result.nodes.push(comboInputNode);
+                options.prevNodes?.forEach(prevNode => {
+                    prevNode.meta.next.push(comboInputNode.id);
+                    result.edges.push({
+                        source: prevNode.id,
+                        target: comboInputNode.id,
+                        style: initEdgeStyle(prevNode.meta.chain === 'continue'),
+                    });
+                });
             }
             const children = _recursition(expression.argument, {
                 parentCombo: combo,
@@ -225,7 +231,7 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                     size: 8,
                     id: genNodeId('combo_output[' + comboId + ']'),
                     style: {
-                        stroke: '#326BFB'
+                        stroke: '#326BFB',
                     },
                     meta: {
                         next: [],
@@ -236,7 +242,7 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                 //     [0.5, 0],
                 //     [0.5, 1],
                 // ],
-                }
+                };
 
                 const isContinue = prevNodesHasContinue && result.conditionResult;
                 children.edges.forEach(edge => {
@@ -251,11 +257,11 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
                             source: n.id,
                             target: comboOutputNode.id,
                             style: initEdgeStyle(isContinue),
-                        })
+                        });
                     }
                 });
 
-                result.nodes.push(comboOutputNode)
+                result.nodes.push(comboOutputNode);
             }
         } else {
             return result;
@@ -264,7 +270,7 @@ export function astToChartData(ast: Expression, conditions: ICondition[]): IChar
         return result;
     }
 
-    return result;   
+    return result;
 }
 
 function genNodeId(expression: number | string) {
@@ -272,5 +278,5 @@ function genNodeId(expression: number | string) {
 }
 
 function genId() {
-    return  String(Math.ceil(Math.random() * 100000000).toString(16)).padEnd(7, '0');
+    return String(Math.ceil(Math.random() * 100000000).toString(16)).padEnd(7, '0');
 }

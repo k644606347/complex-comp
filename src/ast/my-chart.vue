@@ -1,5 +1,9 @@
 <template>
-    <RcpConditionChartPane :value="conditionContent" :conditions="conditions" :class="$style.wrap">
+    <RcpConditionChartPane :value="conditionContent" 
+    @click="chartEvent" 
+    @select="chartEvent" 
+    @unselect="chartEvent" 
+    :conditions="conditions" :class="$style.wrap">
         <div style="display: flex; gap: 20px;">
             <b>我是电路图</b><RcpConditionContent :class="$style['my-content']" />
         </div>
@@ -26,7 +30,8 @@ export default defineComponent({
         RcpConditionContent: rcpConditionContentVue
     },
     setup() {
-        const conditionContent = ref("3 && 1 && (2 || 13) && !(!4 && 5 || !!(!6 && !3)) || 7 && 8 && !9 && 10 && (11 || 12) && !(13 && 14 || !15)");
+        // const conditionContent = ref("3 && 1 && (2 || 13) && !(!4 && 5 || (!6 && !3) || !1) || 14 && 10 && (11 || 12) && !(13 && 14 || 15 || 16 || 17) || 3 && 1 && (2 || 13) && 8 || !(13 && 14 || !15) && !2");
+        const conditionContent = ref("3 && 1 && (2 || 13) && !(!4 && 5 || (!6 && !3) || !1) || 1 && (2 || 3 || 4) && (6 || 7 || 8)");
         const conditions = ref<ICondition[]>([
             { 
                 seq: 1,
@@ -76,13 +81,16 @@ export default defineComponent({
         return {
             conditionContent,
             conditions,
+            chartEvent(...args: any[]) {
+                console.log(args);
+            }
         }
     },
 })
 </script>
 <style lang="less" module>
 .wrap {
-    height: 500px;
+    // height: 500px;
     .my-content {
 
     }

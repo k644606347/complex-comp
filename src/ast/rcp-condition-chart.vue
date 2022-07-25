@@ -1,23 +1,34 @@
 <template>
-  <div ref="chartRef" class="rcp-condition-chart"></div>
+    <div ref="chartRef" class="rcp-condition-chart"></div>
 </template>
+
 <script lang="ts">
 import {
     computed, defineComponent,
-    nextTick, onMounted, ref,
-} from "vue";
-import G6, { IG6GraphEvent, Item, ITEM_TYPE, NodeConfig } from "@antv/g6";
-import { emits, IChartData, useContext } from './utils';
+    nextTick, onMounted, ref, shallowRef, watch,
+} from 'vue';
+import G6, { Graph, IG6GraphEvent, Item, ITEM_TYPE, NodeConfig } from '@antv/g6';
+import { emits, IChartData, ICondition, IEmit, IEvent, IMeta, useContext } from './utils';
+import { isNil } from 'lodash';
+
+const canSelectTypes: ITEM_TYPE[] = [ 'node', 'combo' ];
 
 export default defineComponent({
+    name: 'RcpConditionChart',
     emits: emits,
-    name: "RcpConditionChart",
     setup(props, { emit }) {
         const context = useContext();
         const chartRef = ref<HTMLElement>();
+        const graphRef = shallowRef<Graph | undefined>();
 
         const chartData = computed(() => {
-            return context?.chartData
+            return context?.chartData;
+        });
+
+        watch(chartData, newData => {
+            if (graphRef.value) {
+                graphRef.value.changeData(newData);
+            }
         });
 
         onMounted(async () => {
@@ -28,21 +39,18 @@ export default defineComponent({
                 return;
             }
 
-            const graph = initChart(chartData.value, { container: chartEl });
+            const graph = graphRef.value = initChart(chartData.value, { container: chartEl });
             // (window as any)._graph = graph
 
-            const canSelectTypes: ITEM_TYPE[] = ['node', 'combo'];
-
-            graph.on('mouseenter', (e) => {
+            graph.on('mouseenter', e => {
                 const item = e.item;
                 if (!item || !canSelectTypes.includes(item.getType())) {
                     return;
                 }
                 graph.setItemState(item, 'hover', true);
-                emit('hover', item)
-                context.dispatch('hover', item)
+                emitEvent('hover', item);
             });
-            graph.on('mouseleave', (e) => {
+            graph.on('mouseleave', e => {
                 const item = e.item;
                 if (!item || !canSelectTypes.includes(item.getType())) {
                     return;
@@ -51,8 +59,8 @@ export default defineComponent({
             });
 
             canSelectTypes.forEach(type => {
-                graph.on(type+':click', onItemClick);
-            })
+                graph.on(type + ':click', onItemClick);
+            });
 
             function onItemClick(e: IG6GraphEvent) {
                 const item = e.item;
@@ -63,34 +71,32 @@ export default defineComponent({
                 const state = 'selected';
 
                 const activeStyle = 'rcp-condition-chart-item-actived';
-                let isSelected = item.hasState(state)
+                let isSelected = item.hasState(state);
                 if (isSelected) {
-                    graph.setItemState(item, state, false)
-                    wrapEl.querySelector<HTMLElement>(`[data-item-id="${item.getID()}"]`)?.classList.remove(activeStyle)
+                    graph.setItemState(item, state, false);
+                    wrapEl.querySelector<HTMLElement>(`[data-item-id="${item.getID()}"]`)?.classList.remove(activeStyle);
                 } else {
-                    graph.findAllByState(item.getType(), state).forEach((item) => {
+                    graph.findAllByState(item.getType(), state).forEach(item => {
                         graph.setItemState(item, state, false);
-                    })
-                    graph.setItemState(item, state, true)
+                    });
+                    graph.setItemState(item, state, true);
 
-                    wrapEl.querySelectorAll<HTMLElement>(`[data-item-id]`).forEach(el => {
+                    wrapEl.querySelectorAll<HTMLElement>('[data-item-id]').forEach(el => {
                         const { dataset, classList } = el;
 
-                        dataset.itemId === item.getID() 
-                            ? classList.add(activeStyle) 
-                            : classList.remove(activeStyle)
-                    })
+                        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+                        dataset.itemId === item.getID()
+                            ? classList.add(activeStyle)
+                            : classList.remove(activeStyle);
+                    });
                 }
                 isSelected = !isSelected;
 
-                emit('click', item);
-                context.dispatch('click', item);
-                const selectEvent = isSelected ? 'select' : 'unselect';
-                emit(selectEvent, item);
-                context.dispatch(selectEvent, item);
+                emitEvent('click', item);
+                emitEvent(isSelected ? 'select' : 'unselect', item);
             }
 
-            wrapEl.addEventListener('click', (e) => {
+            wrapEl.addEventListener('click', e => {
                 const target = e.target as HTMLElement | undefined;
                 if (!target || !target.dataset.itemId) {
                     return;
@@ -98,38 +104,58 @@ export default defineComponent({
 
                 const itemId = target.dataset.itemId;
                 const itemType = target.dataset.itemType as ITEM_TYPE | undefined;
-                
+
                 const state = 'selected';
 
-                wrapEl.querySelectorAll<HTMLElement>(`[data-item-id]`).forEach(el => {
+                wrapEl.querySelectorAll<HTMLElement>('[data-item-id]').forEach(el => {
                     const activeStyle = 'rcp-condition-chart-item-actived';
                     const { dataset, classList } = el;
 
+                    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
                     dataset.itemId === itemId
-                        ? classList.add(activeStyle) 
-                        : classList.remove(activeStyle)
-                })
+                        ? classList.add(activeStyle)
+                        : classList.remove(activeStyle);
+                });
 
                 if (itemType) {
                     const clickItems = canSelectTypes.reduce((prev, cur) => {
-                        return prev.concat(graph.findAllByState(cur, state))
+                        return prev.concat(graph.findAllByState(cur, state));
                     }, [] as Item[]);
 
-                    clickItems.forEach((cn) => {
+                    clickItems.forEach(cn => {
                         graph.setItemState(cn, state, false);
                     });
                 }
 
-                const item = graph.findById(itemId)
+                const item = graph.findById(itemId);
                 if (item) {
-                    graph.setItemState(item , state, true)
+                    graph.setItemState(item, state, true);
                     graph.focusItem(item, true, {
                         easing: 'easeCubic',
                         duration: 400,
-                    })
+                    });
                 }
             });
         });
+
+        function emitEvent(e: IEmit, item: Item) {
+            const meta = item.getModel().meta as IMeta | undefined;
+            const seq = meta?.seq;
+
+            let condition: ICondition | undefined;
+            if (!isNil(seq)) {
+                condition = context?.getConditions().find(condition => condition.seq === seq);
+            }
+
+            const eventArgs: IEvent = {
+                seq,
+                condition,
+                itemType: item.getType(),
+            };
+
+            emit(e, eventArgs);
+            context?.dispatch(e, eventArgs);
+        }
 
         return {
             chartRef,
@@ -137,8 +163,8 @@ export default defineComponent({
     },
 });
 
-function initChart(data: IChartData, 
-    { container }: { 
+function initChart(data: IChartData,
+    { container }: {
         container: HTMLElement
     }) {
     // const width = container.scrollWidth;
@@ -149,7 +175,7 @@ function initChart(data: IChartData,
     });
     const minimap = new G6.Minimap({
         className: 'rcp-condition-chart-minimap',
-        type: "delegate",
+        type: 'delegate',
     });
     const graph = new G6.Graph({
         container: container,
@@ -168,14 +194,14 @@ function initChart(data: IChartData,
                 // 'drag-combo',
             ],
         },
-        plugins: [minimap, toolbar],
+        plugins: [ minimap, toolbar ],
         layout: {
-            type: "dagre",
-            rankdir: "LR",
+            type: 'dagre',
+            rankdir: 'LR',
             // align: "UL",
             controlPoints: true,
             // sortByCombo: true,
-            // nodesepFunc: () => 16,
+            nodesepFunc: () => 25,
             ranksepFunc(node: NodeConfig) {
                 if (/^combo_input|combo_output/.test(node.id)) {
                     return 0;
@@ -184,13 +210,13 @@ function initChart(data: IChartData,
             },
         },
         defaultNode: {
-            size: [85, 52],
-            type: "rect",
+            size: [ 85, 52 ],
+            type: 'rect',
             style: {
                 fontSize: 14,
                 lineWidth: 1,
-                stroke: "#F0F2F5",
-                fill: "#fff",
+                stroke: '#F0F2F5',
+                fill: '#fff',
                 radius: 4,
                 shadowOffsetX: 0,
                 shadowOffsetY: 2,
@@ -231,7 +257,7 @@ function initChart(data: IChartData,
             },
         },
         defaultEdge: {
-            type: "polyline",
+            type: 'polyline',
             size: 1,
         },
     });
@@ -279,6 +305,7 @@ function initChart(data: IChartData,
     return graph;
 }
 </script>
+
 <style lang="less">
 .rcp-condition-chart {
   position: relative;
